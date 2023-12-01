@@ -13,7 +13,7 @@ from common import output_log
 import config
 
 API_KEY = config.API_KEY
-SERVER_ID = config.SERVER_ID
+SERVER_IDS = config.SERVER_IDS
 BTC_TOKEN = config.BTC_TOKEN
 MATIC_TOKEN = config.MATIC_TOKEN
 MV_TOKEN = config.MV_TOKEN
@@ -35,7 +35,6 @@ parameters = {
 
 
 def get_price():
-  # output_log("Get")
   try:
     r = requests.get(url, headers=headers, params=parameters)
     if r.status_code != requests.codes.ok:
@@ -52,7 +51,6 @@ def get_price():
 
 
 def load_price():
-  # output_log("Load")
   if os.path.isfile("price.json"):
     with open("price.json", "r", encoding="utf-8") as f:
       return json.load(f)
@@ -60,22 +58,25 @@ def load_price():
 
 
 class CryptoPrice:
-  _client: discord.Client
-  _token: str
-  _id: str
-  _token_name: str
-  _get_price: bool
-  _member: discord.Member
 
-  def __init__(self, token: str, id: str, token_name: str, get_price=False):
+  def __init__(self,
+               token: str,
+               id: str,
+               token_name: str,
+               get_price=False,
+               server_id=None):
     self._token = token
     self._id = id
     self._token_name = token_name
     self._get_price = get_price
     self._member = None
+    self._server_id = server_id
     output_log(f"{self._token_name} Initialized")
 
   async def main(self):
+    intents = discord.Intents.default()
+    intents.message_content = True
+    self._client = discord.Client(intents=intents)
 
     @tasks.loop(minutes=10)
     async def loop():
@@ -93,40 +94,53 @@ class CryptoPrice:
               j['data'][self._id]['quote']['USD']['percent_change_7d'])
           sign_24h = "+" if change_24h > 0 else ""
           sign_7d = "+" if change_7d > 0 else ""
-          # name = f"${price:.4f} ({sign}{change:.1f}% 24h)"
           nick = f"{self._token_name}  ${price:.5f}"
           activity = f"{sign_24h}{change_24h:.1f}% 24h, {sign_7d}{change_7d:.1f}% 7D"
-          # output_log(f"${self._token_name} {price:.4f} ({sign}{change:.1f}% 24h)")
           activity = discord.Activity(name=activity,
                                       type=discord.ActivityType.watching)
+
           await self._client.wait_until_ready()
-          if self._member is None:
-            guild = self._client.get_guild(SERVER_ID)
-            # print(f"Guild: {guild.name}")
+          guild = self._client.get_guild(self._server_id)
+
+          if guild is not None:
             self._member = guild.get_member(self._client.user.id)
-            print(f"{self._member.name}")
-          await self._member.edit(nick=nick)
-          await self._client.change_presence(activity=activity)
+
+            if self._member is not None:
+              await self._member.edit(nick=nick)
+              await self._client.change_presence(activity=activity)
+            else:
+              output_log(f"Bot is not in the guild with ID {self._server_id}")
+          else:
+            output_log(f"Guild with ID {self._server_id} not found.")
       except Exception as e:
         output_log(e)
         output_log(traceback.format_exc())
 
-    async with self._client:
+    @self._client.event
+    async def on_ready():
       loop.start()
-      await self._client.start(self._token)
+
+    await self._client.start(self._token)
 
   def start(self):
-    intents = discord.Intents.default()
-    intents.message_content = True
-    self._client = discord.Client(intents=intents)
-    asyncio.run(self.main())
+    loop = asyncio.new_event_loop()  # Create a new event loop
+    asyncio.set_event_loop(
+        loop)  # Set the created event loop as the current event loop
+    try:
+      loop.create_task(self.main())  # Create a new task within the event loop
+      loop.run_forever(
+      )  # Run the event loop indefinitely to manage the created task
+    finally:
+      loop.close()  # Close the event loop when it's no longer needed
 
 
-def thread_entry(dict):
+def thread_entry(dict, server_id):
   if dict["token_name"] == "BTC":
-    cp = CryptoPrice(dict["token"], dict["id"], dict["token_name"], True)
+    cp = CryptoPrice(dict["token"], dict["id"], dict["token_name"], True,
+                     server_id)
   else:
-    cp = CryptoPrice(dict["token"], dict["id"], dict["token_name"])
+    cp = CryptoPrice(dict["token"], dict["id"], dict["token_name"], True,
+                     server_id)
   cp.start()
 
 
@@ -156,9 +170,11 @@ settings = [
 keep_alive()
 
 threads = []
-for s in settings:
-  thread = threading.Thread(target=thread_entry, args=(s, ))
-  thread.start()
-  threads.append(thread)
+for server_id in SERVER_IDS:
+  for s in settings:
+    thread = threading.Thread(target=thread_entry, args=(s, server_id))
+    thread.start()
+    threads.append(thread)
+
 for thread in threads:
   thread.join()
