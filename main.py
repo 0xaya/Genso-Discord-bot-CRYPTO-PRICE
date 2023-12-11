@@ -38,6 +38,7 @@ def get_price():
   try:
     r = requests.get(url, headers=headers, params=parameters)
     if r.status_code != requests.codes.ok:
+      print('Status Code: ' + str(r.status_code))
       return None
     j = json.loads(r.text)
     if j['status']['error_code'] == 0:
@@ -78,7 +79,7 @@ class CryptoPrice:
     intents.message_content = True
     self._client = discord.Client(intents=intents)
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(minutes=30)
     async def loop():
       try:
         if self._get_price:
@@ -112,6 +113,16 @@ class CryptoPrice:
               output_log(f"Bot is not in the guild with ID {self._server_id}")
           else:
             output_log(f"Guild with ID {self._server_id} not found.")
+        else:
+          nick = f"{self._token_name}"
+          await self._client.wait_until_ready()
+          guild = self._client.get_guild(self._server_id)
+
+          if guild is not None:
+            self._member = guild.get_member(self._client.user.id)
+
+            if self._member is not None:
+              await self._member.edit(nick=nick)
       except Exception as e:
         output_log(e)
         output_log(traceback.format_exc())

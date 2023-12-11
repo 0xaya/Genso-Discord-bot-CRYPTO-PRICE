@@ -1,6 +1,6 @@
 import os
 
-API_KEY = os.getenv('API_KEY')
+API_KEY = os.getenv('API_KEY_BLOB')
 SERVER_IDS = [1151361610527551498, 1153178582852567082]
 # Add more server IDs as needed
 
